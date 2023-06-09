@@ -1,0 +1,320 @@
+#include <tfhe/tfhe.h>
+#include <tfhe/tfhe_io.h>
+#include <stdio.h>
+#include <tfhe/lwe-functions.h>
+
+#include<bits/stdc++.h>
+using namespace std;
+
+const int num_bits = 8;
+int comptador;
+
+// FUNCIO SECUNDARIA DE SUMA 
+void sumar_full(LweSample *sum, const LweSample *x, const LweSample *y, const LweSample *c, const int32_t nb_bits, const TFheGateBootstrappingCloudKeySet *keyset){
+	const LweParams *in_out_params = keyset->params->in_out_params;	
+	if (nb_bits == 0){
+		return;
+	}
+	LweSample *carry = new_LweSample_array(1, in_out_params);
+	LweSample *axc = new_LweSample_array(1, in_out_params);
+	LweSample *bxc = new_LweSample_array(1, in_out_params);
+	bootsCOPY(carry, c, keyset);
+
+	for(int32_t i = 0; i < nb_bits; ++i){
+    bootsCOPY(axc, x + i, keyset);
+		bootsCOPY(bxc, y + i, keyset);
+    bootsXOR(axc, axc, bxc, keyset);
+    bootsXOR(sum + i, axc, carry, keyset);
+    bootsAND(axc, axc, carry, keyset);
+    bootsAND(bxc, x+i, y+i, keyset);
+    bootsOR(carry, axc, bxc, keyset);    
+	}
+	delete_LweSample_array(1, carry);
+	delete_LweSample_array(1, axc);
+	delete_LweSample_array(1, bxc);
+}
+
+// FUNCIO PRINCIPAL DE SUMA 
+void sumar(LweSample* result, const LweSample* a, const LweSample* b, const int nb_bits, const TFheGateBootstrappingCloudKeySet* bk) {
+  LweSample* carry = new_gate_bootstrapping_ciphertext_array(1, bk->params);
+  bootsCONSTANT(carry, 0, bk);
+  sumar_full(result, a, b, carry, nb_bits, bk);
+}
+
+// FUNCIO SECUNDARIA DE RESTA 
+void restar_full(LweSample *sum, const LweSample *x, const LweSample *y, const LweSample *c, const int32_t nb_bits, const TFheGateBootstrappingCloudKeySet *keyset){
+	const LweParams *in_out_params = keyset->params->in_out_params;	
+	if (nb_bits == 0){
+		return;
+	}
+	LweSample *carry = new_LweSample_array(1, in_out_params);
+	LweSample *axc = new_LweSample_array(1, in_out_params);
+	LweSample *bxc = new_LweSample_array(1, in_out_params);
+	bootsCOPY(carry, c, keyset);
+
+	for(int32_t i = 0; i < nb_bits; ++i){
+    bootsCOPY(axc, x + i, keyset);
+		bootsCOPY(bxc, y + i, keyset);
+    bootsXOR(axc, x+i, y+i, keyset);
+    bootsXOR(sum + i, axc, carry, keyset);
+    bootsANDNY(bxc, x+i, y+i, keyset);
+    bootsANDNY(axc, axc, carry, keyset);
+    bootsOR(carry, axc, bxc, keyset);
+	}
+	delete_LweSample_array(1, carry);
+	delete_LweSample_array(1, axc);
+	delete_LweSample_array(1, bxc);
+}
+
+// FUNCIO PRINCIPA DE RESTA 
+void restar(LweSample* result, const LweSample* a, const LweSample* b, const int nb_bits, const TFheGateBootstrappingCloudKeySet* bk) {
+  LweSample* carry = new_gate_bootstrapping_ciphertext_array(1, bk->params);
+  bootsCONSTANT(carry, 0, bk);
+  restar_full(result, a, b, carry, nb_bits, bk);
+}
+
+// 
+void equal(LweSample* result, const LweSample* a, const LweSample* b, const int nb_bits, const TFheGateBootstrappingCloudKeySet* bk){
+  LweSample* tmps = new_gate_bootstrapping_ciphertext_array(2, bk->params);
+  bootsCONSTANT(&result[0], 1, bk);
+  for(int i = 0; i < nb_bits; i++){
+    bootsXNOR(&tmps[0], &a[i], &b[i], bk);
+    bootsAND(&result[0], &result[0], &tmps[0], bk);
+  }
+  delete_gate_bootstrapping_ciphertext_array(2, tmps);
+}
+
+// FUNCIÓ PER MULTIPLICAR
+void multiplicar(LweSample* result, const LweSample* a, const LweSample* b, const int nb_bits, const TFheGateBootstrappingCloudKeySet* bk) {
+  LweSample* tmps = new_gate_bootstrapping_ciphertext_array(nb_bits, bk->params);
+  LweSample* aux = new_gate_bootstrapping_ciphertext_array(nb_bits, bk->params);
+  LweSample* aux2 = new_gate_bootstrapping_ciphertext_array(nb_bits, bk->params);
+  LweSample* factor = new_gate_bootstrapping_ciphertext_array(nb_bits, bk->params);
+  LweSample* sumando = new_gate_bootstrapping_ciphertext_array(nb_bits, bk->params);
+  LweSample* cero = new_gate_bootstrapping_ciphertext_array(nb_bits, bk->params);
+  LweSample* uno = new_gate_bootstrapping_ciphertext_array(nb_bits, bk->params);
+
+  // TODO result y res_aux tienen que tener el doble de bits que nb_bits
+  LweSample* res_aux = new_gate_bootstrapping_ciphertext_array(nb_bits, bk->params);
+  bootsCONSTANT(&tmps[0], 0, bk);
+  for(int i=0; i < nb_bits; i++){
+    bootsCONSTANT(&result[i], 0, bk);
+    bootsCONSTANT(&aux[i], 0, bk);
+    bootsCONSTANT(&aux2[i], 0, bk);
+    bootsCONSTANT(&factor[i], 0, bk);
+    bootsCONSTANT(&sumando[i], 0, bk);
+    bootsCONSTANT(&cero[i], 0, bk);
+    bootsCONSTANT(&uno[i], 0, bk);
+  }
+  bootsCONSTANT(&uno[0], 1, bk);
+
+  for(int i = 0; i < pow(2, nb_bits); i++){
+    equal(tmps, aux, b, nb_bits, bk);
+
+    for(int j = 0; j < nb_bits; j++){
+      bootsMUX(&sumando[j], &tmps[0], &cero[j], &uno[j], bk);
+      bootsMUX(&factor[j], &tmps[0], &cero[j], &a[j], bk);
+    }
+    sumar(aux2, aux, sumando, nb_bits, bk);
+
+    for(int j = 0; j < nb_bits; j++){
+      bootsCOPY(&aux[j], &aux2[j], bk);
+  }
+  sumar(res_aux, result, factor, nb_bits, bk);
+  
+  for(int j = 0; j < nb_bits; j++){
+    bootsCOPY(&result[j], &res_aux[j], bk);
+  }
+}
+delete_gate_bootstrapping_ciphertext_array(nb_bits, tmps);
+delete_gate_bootstrapping_ciphertext_array(nb_bits, aux);
+delete_gate_bootstrapping_ciphertext_array(nb_bits, factor);
+delete_gate_bootstrapping_ciphertext_array(nb_bits, sumando);
+delete_gate_bootstrapping_ciphertext_array(nb_bits, cero);
+delete_gate_bootstrapping_ciphertext_array(nb_bits, uno);
+delete_gate_bootstrapping_ciphertext_array(nb_bits, res_aux);
+}
+
+// FUNCIO PER COMPARAR (x_barra, y_barra) = mult_i=0 (1 - x_i - y_i + 2 * x_i *y_i)
+void comparar(LweSample* result, const LweSample* a, const LweSample* b, const int nb_bits, const TFheGateBootstrappingCloudKeySet* bk){
+	int k = 0;
+	
+  //if necessary, the params are inside the key
+  const TFheGateBootstrappingParameterSet* params = bk->params;
+	
+  FILE* secret_key = fopen("secret.key","rb");
+  TFheGateBootstrappingSecretKeySet* key = new_tfheGateBootstrappingSecretKeySet_fromFile(secret_key);
+	fclose(secret_key);
+
+	LweSample* s1 = new_gate_bootstrapping_ciphertext_array(nb_bits, params);
+	LweSample* c1 = new_gate_bootstrapping_ciphertext_array(nb_bits, params);
+	LweSample* c2 = new_gate_bootstrapping_ciphertext_array(nb_bits, params);
+	LweSample* c3 = new_gate_bootstrapping_ciphertext_array(nb_bits, params);
+	LweSample* c4 = new_gate_bootstrapping_ciphertext_array(nb_bits, params);
+	LweSample* c5 = new_gate_bootstrapping_ciphertext_array(nb_bits, params);
+	LweSample* c6 = new_gate_bootstrapping_ciphertext_array(nb_bits, params);
+	LweSample* uno_ciphertext = new_gate_bootstrapping_ciphertext_array(nb_bits, params);
+	LweSample* dos_ciphertext = new_gate_bootstrapping_ciphertext_array(nb_bits, params);
+	LweSample* zero_ciphertext = new_gate_bootstrapping_ciphertext_array(nb_bits, params);
+   
+  int16_t uno_plaintext = 1;
+  for (int i=0; i<nb_bits; i++) {
+    bootsSymEncrypt(&uno_ciphertext[i], (uno_plaintext>>i)&1, key);
+  }
+  int16_t dos_plaintext = 2;
+  for (int i=0; i<nb_bits; i++) {
+    bootsSymEncrypt(&dos_ciphertext[i], (dos_plaintext>>i)&1, key);
+  }
+	int16_t zero_plaintext = 0;
+    for (int i=0; i<nb_bits; i++) {
+      bootsSymEncrypt(&zero_ciphertext[i], (zero_plaintext>>i)&1, key);
+  }
+    
+	// reiniciem les variables
+	for(int j = 0; j < nb_bits; j++){
+    bootsCOPY(&result[j], &s1[j], bk);
+	  bootsCOPY(&c4[j], &zero_ciphertext[j], bk);
+    bootsCOPY(&c5[j], &zero_ciphertext[j], bk);
+    bootsCOPY(&c6[j], &zero_ciphertext[j], bk);
+  }
+
+	for(int j = 0; j < nb_bits; j++){
+		multiplicar(c1, &a[j], &b[j], 1, bk);
+		sumar(c2, c1, c1, 1, bk);
+		sumar(c3, uno_ciphertext, c2, 1, bk);
+		restar(c3, c3, &a[j], 1, bk);
+		restar(c4, c3, &b[j], 1, bk);
+		
+		k=j-1;
+		int l = j+1;
+		if (j==0){
+		  multiplicar(c5, c4, c4, 1, bk);
+		  for(int j = 0; j < nb_bits; j++){
+			  bootsCOPY(c6, c5, bk);
+		  }
+		}else{
+		  multiplicar(c5, c6, c4, 1, bk);
+		  for(int j = 0; j < nb_bits; j++){
+			  bootsCOPY(c6, c5, bk);
+		  }
+		}
+	}
+
+	for(int j = 0; j < nb_bits; j++){
+	  bootsCOPY(&result[j], &c5[j], bk);
+	}
+	
+	// exportem el resultat en definitiva a un fitxer
+  FILE* answer_fitxer = fopen("answer_fitxer.txt","wb");
+  for (int i=0; i<num_bits; i++){
+	  export_gate_bootstrapping_ciphertext_toFile(answer_fitxer, &result[i], params);
+	}
+  fclose(answer_fitxer);
+
+  delete_gate_bootstrapping_ciphertext_array(nb_bits, s1);
+  delete_gate_bootstrapping_ciphertext_array(nb_bits, c1);
+  delete_gate_bootstrapping_ciphertext_array(nb_bits, c2);
+  delete_gate_bootstrapping_ciphertext_array(nb_bits, c3);
+  delete_gate_bootstrapping_ciphertext_array(nb_bits, c4);
+  delete_gate_bootstrapping_ciphertext_array(nb_bits, c5);
+  delete_gate_bootstrapping_ciphertext_array(nb_bits, c6);
+  delete_gate_bootstrapping_ciphertext_array(nb_bits, zero_ciphertext);
+  delete_gate_bootstrapping_ciphertext_array(nb_bits, uno_ciphertext);
+  delete_gate_bootstrapping_ciphertext_array(nb_bits, dos_ciphertext);
+}
+
+
+int main() {
+  //reads the cloud key from file
+  FILE* cloud_key = fopen("cloud.key","rb");
+  TFheGateBootstrappingCloudKeySet* bk = new_tfheGateBootstrappingCloudKeySet_fromFile(cloud_key);
+  fclose(cloud_key);
+	
+	FILE* secret_key = fopen("secret.key","rb");
+  TFheGateBootstrappingSecretKeySet* key = new_tfheGateBootstrappingSecretKeySet_fromFile(secret_key);
+  fclose(secret_key);
+ 
+  const TFheGateBootstrappingParameterSet* params = bk->params;
+
+  // cream els 2 ciphertext
+  LweSample* ciphertext1 = new_gate_bootstrapping_ciphertext_array(num_bits, params);
+  LweSample* ciphertext2 = new_gate_bootstrapping_ciphertext_array(num_bits, params);
+
+  // PRIMER CIPHER:
+  FILE* primer_cipher_file_encriptat = fopen("primer_cipher_file_encriptat.txt","rb");
+  for (int i=0; i<num_bits; i++) import_gate_bootstrapping_ciphertext_fromFile(primer_cipher_file_encriptat, &ciphertext1[i], params);
+  fclose(primer_cipher_file_encriptat);
+
+  // SEGON CIPHER:
+  FILE* segon_cipher_file_encriptat = fopen("segon_cipher_file_encriptat.txt","rb");
+
+  int prev=ftell(segon_cipher_file_encriptat);
+  fseek(segon_cipher_file_encriptat, 0L, SEEK_END);
+  int size2=ftell(segon_cipher_file_encriptat);
+  fseek(segon_cipher_file_encriptat,prev,SEEK_SET); //go back to where we were
+  printf("- size ciphertext %d\n", size2);
+    
+	LweSample* result_comparacio = new_gate_bootstrapping_ciphertext_array(num_bits, params);
+  LweSample* resultat_final = new_gate_bootstrapping_ciphertext_array(num_bits, params);
+
+  for(int i=0; i<num_bits; i++){
+    bootsCONSTANT(&resultat_final[i], 0, bk);
+  }
+
+  FILE *comptador_file= fopen("comptador_file.txt", "rb");
+  fscanf(comptador_file, "%d", &comptador);
+  fclose(comptador_file);
+
+  clock_t start_time_total = clock();
+
+  for(int j=0; j<comptador; j++){
+    for (int i=0; i<num_bits; i++) {
+      import_gate_bootstrapping_ciphertext_fromFile(segon_cipher_file_encriptat, &ciphertext2[i], params);
+    }
+    
+    clock_t start_time = clock();
+    comparar(result_comparacio, ciphertext1, ciphertext2, num_bits, bk);
+    clock_t end_time1 = clock();
+    clock_t result_clock = end_time1 - start_time;
+
+    int ai_cipher2 = 0;
+    int16_t int_answer_cipher2 = 0;
+
+    for (int i=0; i<num_bits; i++) {
+			ai_cipher2 = bootsSymDecrypt(&result_comparacio[i], key);
+      int_answer_cipher2 |= (ai_cipher2<<i);
+    }
+	  //printf("- Valor de la comparació del nombre inserit amb l'element [%d] de la llista: %d\n", j, int_answer_cipher2);
+    
+    // cout<<result_clock/CLOCKS_PER_SEC<<" segons"<<endl;
+
+    sumar(resultat_final, resultat_final, result_comparacio, num_bits, bk);
+  }
+  clock_t end_time_total = clock();
+  clock_t result_clock_total = end_time_total - start_time_total;
+  cout<<result_clock_total/CLOCKS_PER_SEC<<" segons totals"<<endl;
+
+  fclose(segon_cipher_file_encriptat);
+
+  int ai_cipher_final = 0;
+  int16_t int_answer_cipher_final = 0;
+
+  for (int i=0; i<num_bits; i++) {
+		ai_cipher_final = bootsSymDecrypt(&resultat_final[i], key);
+    int_answer_cipher_final |= (ai_cipher_final<<i);
+  }
+
+  if(int_answer_cipher_final > 0){
+    printf("- El nombre inserit SÍ es troba dins la llista\n");
+  }else{
+    printf("- El nombre inserit NO es troba dins la llista\n");
+  }
+	
+  printf("-----------------------------------\n");
+  // eliminar tots els punters
+  delete_gate_bootstrapping_ciphertext_array(num_bits, ciphertext1);
+  delete_gate_bootstrapping_ciphertext_array(num_bits, ciphertext2);
+  delete_gate_bootstrapping_ciphertext_array(num_bits, result_comparacio);
+  delete_gate_bootstrapping_ciphertext_array(num_bits, resultat_final);
+  delete_gate_bootstrapping_cloud_keyset(bk);
+}

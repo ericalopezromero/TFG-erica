@@ -1,0 +1,161 @@
+#include <tfhe/tfhe.h>
+#include <tfhe/tfhe_io.h>
+#include <stdio.h>
+#include <fstream>
+#include <sstream>
+using namespace std;
+#include <iostream>
+
+const int num_bits = 8;
+int long_llista = 20;
+int numbers[50];
+int comptador = 0;
+int value = 0;
+
+void primer_cipher(TFheGateBootstrappingSecretKeySet* key, TFheGateBootstrappingParameterSet* params, int16_t plaintext, LweSample* ciphertext){
+	FILE* primer_cipher_file_encriptat = fopen("primer_cipher_file_encriptat.txt","wb");
+	for (int i=0; i<num_bits; i++) {
+        bootsSymEncrypt(&ciphertext[i], (plaintext>>i)&1, key);
+		export_gate_bootstrapping_ciphertext_toFile(primer_cipher_file_encriptat, &ciphertext[i], params);
+    }
+    fclose(primer_cipher_file_encriptat);
+}
+
+void segon_cipher(TFheGateBootstrappingSecretKeySet* key, TFheGateBootstrappingParameterSet* params, LweSample* ciphertext){
+	FILE* segon_cipher_file_encriptat = fopen("segon_cipher_file_encriptat.txt","wb");
+	for (int j=0; j<comptador; j++){
+        int16_t plaintext = numbers[j];
+        for (int i=0; i<num_bits; i++) {
+			bootsSymEncrypt(&ciphertext[i], (plaintext>>i)&1, key);
+			export_gate_bootstrapping_ciphertext_toFile(segon_cipher_file_encriptat, &ciphertext[i], params);
+		}
+    }
+	fclose(segon_cipher_file_encriptat);
+}
+
+void copy_comptador_to_file(){
+    // copio el valor de "comptador" per després poder-ho fer servir des d'una altra classe
+    FILE* comptador_file = fopen("comptador_file.txt","wb");
+	fprintf(comptador_file, "%d\n", comptador);
+    fclose(comptador_file);
+}
+
+ 
+// Function to find a random
+// number between 0 or 1
+int findRandom()
+{
+    // Generate the random number
+    int num = ((int)rand() % 2);
+ 
+    // Return the generated number
+    return num;
+}
+
+//pid_t getpid();
+
+// Function to generate a random
+// binary string of length N
+int generateBinaryString(int N)
+{
+    int x = 0;
+    rand();
+ 
+    // Stores the empty string
+    string S = "";
+ 
+    // Iterate over the range [0, N - 1]
+    for (int i = 0; i < N; i++) {
+ 
+        // Store the random number
+        x = findRandom();
+ 
+        // Append it to the string
+        S += to_string(x);
+    }
+    // Print the resulting string
+    //std::cout << S <<"\n";
+
+    value = std::stoull(S, 0, 2); 
+    //std::cout << value << std::endl;
+    return value;
+}
+
+time_t t1; // declare time variable  
+
+int main() {
+    //generate a keyset
+    const int minimum_lambda = 110;
+    
+    TFheGateBootstrappingParameterSet* params = new_default_gate_bootstrapping_parameters(minimum_lambda);
+
+    //generate a random key
+    uint32_t seed[] = { 314, 1592, 657 };
+    tfhe_random_generator_setSeed(seed,3);
+    TFheGateBootstrappingSecretKeySet* key = new_random_gate_bootstrapping_secret_keyset(params);
+
+    //export the secret key to file for later use
+
+    FILE* secret_key = fopen("secret.key","wb");
+    export_tfheGateBootstrappingSecretKeySet_toFile(secret_key, key);
+    fclose(secret_key);
+
+    //export the cloud key to a file (for the cloud)
+    FILE* cloud_key = fopen("cloud.key","wb");
+    export_tfheGateBootstrappingCloudKeySet_toFile(cloud_key, &key->cloud);
+    fclose(cloud_key);
+    
+    srand ( (unsigned) time (&t1)); 
+
+	// PRIMER CIPHERTEXT:
+    int plaintext1 = generateBinaryString(num_bits);
+    printf("- plaintext: %d \n", plaintext1);
+    LweSample* ciphertext1 = new_gate_bootstrapping_ciphertext_array(num_bits, params);
+    primer_cipher(key, params, plaintext1, ciphertext1);
+
+    FILE *segon_cipher_file= fopen("segon_cipher_file.txt", "w");
+    
+	// SEGON CIPHERTEXT; 
+    for (int i=0;i<long_llista; i++){
+        int num_llista = generateBinaryString(num_bits);
+        if(i<(long_llista-1)){
+            fprintf(segon_cipher_file, "%d\n", num_llista);
+            printf("%d, ", num_llista);
+        }else{
+            fprintf(segon_cipher_file, "%d", num_llista);
+             printf("%d\n", num_llista);
+        } 
+    }
+    fclose(segon_cipher_file);
+
+    FILE *segon_cipher_file2= fopen("segon_cipher_file.txt", "r");
+
+    int prev=ftell(segon_cipher_file2);
+    fseek(segon_cipher_file2, 0L, SEEK_END);
+    int size2=ftell(segon_cipher_file2);
+    fseek(segon_cipher_file2,prev,SEEK_SET); //go back to where we were
+    printf("- SIZE plaintext %d\n", size2);
+
+    if (segon_cipher_file2){
+        while (fscanf(segon_cipher_file2, "%d", &numbers[comptador]) != EOF){
+            comptador++;
+        }
+        fclose(segon_cipher_file2);
+        numbers[comptador] = '\0';    
+    }
+
+    LweSample* ciphertext2 = new_gate_bootstrapping_ciphertext_array(num_bits, params);
+	segon_cipher(key, params, ciphertext2);
+    
+	// copiar la variable "comptador" a un fitxer
+	copy_comptador_to_file();
+    
+	// eliminar tots els punters
+    delete_gate_bootstrapping_ciphertext_array(num_bits, ciphertext1);
+    delete_gate_bootstrapping_ciphertext_array(num_bits, ciphertext2);
+
+    delete_gate_bootstrapping_secret_keyset(key);
+    delete_gate_bootstrapping_parameters(params);
+
+}
+  
